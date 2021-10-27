@@ -39,6 +39,13 @@ jobs:
       - name: Call setup-lisp with default arguments
         if: github.event_name != 'schedule'
         uses: ./setup-lisp/
+        with:
+          roswell-version: latest
+          # XXX remove this override (i.e. put "latest" back in) after the
+          # following roswell issue has been solved:
+          # https://github.com/roswell/roswell/issues/497
+          asdf-version: 3.3.5.3
+          qlot-version: latest
       - name: Call setup-lisp and install latest
         if: github.event_name == 'schedule'
         uses: ./setup-lisp/
