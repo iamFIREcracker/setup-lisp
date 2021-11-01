@@ -7,10 +7,15 @@ on:
     - cron: "0 0 * * SUN"
 
 jobs:
+  ci-config:
+    runs-on: ubuntu-latest
+    outputs:
+      # We want to run on external PRs, but not on our own internal PRs as
+      # they'll be run by the push to the branch.
+      enabled: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
   tests:
-    # We want to run on external PRs, but not on our own internal PRs as
-    # they'll be run by the push to the branch.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: ci-config
+    if: needs.ci-config.outputs.enabled == 'true'
     strategy:
       fail-fast: false # Let the workflow continue as much as possible
       matrix:
