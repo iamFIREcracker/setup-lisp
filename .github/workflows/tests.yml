@@ -12,10 +12,82 @@ jobs:
     outputs:
       # We want to run on external PRs, but not on our own internal PRs as
       # they'll be run by the push to the branch.
-      enabled: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
-  tests:
+      enabled: ${{ steps.set-enabled.outputs.enabled }}
+      roswell-version: ${{ steps.set-deps-versions.outputs.roswell-version }}
+      asdf-version: ${{ steps.set-deps-versions.outputs.asdf-version }}
+      qlot-version: ${{ steps.set-deps-versions.outputs.qlot-version }}
+    steps:
+      - id: set-enabled
+        name: Set enabled
+        run: |
+          event_name=${{ github.event_name }}
+          pull_request_repo=${{ github.event.pull_request.head.repo.full_name }}
+          repo=${{ github.repository }}
+
+          enabled=no
+          if test "$event_name" != 'pull_request' -o "$pull_request_repo" != "$repo"
+          then
+            enabled=yes
+          fi
+          echo "::set-output name=enabled::$enabled"
+      - id: set-deps-versions
+        name: Set dependencies versions
+        run: |
+          event_name=${{ github.event_name }}
+
+          roswell_version=v21.10.14.111
+          asdf_version=3.3.5.3
+          qlot_version=0.11.5
+          if [[ $event_name == 'schedule' ]]; then
+            roswell_version=latest
+            # XXX remove this override (i.e. put "latest" back in) after the
+            # following roswell issue has been solved:
+            # https://github.com/roswell/roswell/issues/497
+            # asdf_version=latest
+            asdf_version=3.3.5.3
+            qlot_version=latest
+          fi
+          echo "::set-output name=roswell-version::$roswell_version"
+          echo "::set-output name=asdf-version::$asdf_version"
+          echo "::set-output name=qlot-version::$qlot_version"
+
+  install-custom:
     needs: ci-config
-    if: needs.ci-config.outputs.enabled == 'true'
+    if: needs.ci-config.outputs.enabled == 'yes'
+    strategy:
+      fail-fast: false # Let the workflow continue as much as possible
+      matrix:
+        lisp: [ abcl-bin, ccl-bin, sbcl-bin ]
+        include:
+          - lisp: abcl-bin
+            impl-type-output: "Armed Bear Common Lisp"
+          - lisp: ccl-bin
+            impl-type-output: "Clozure Common Lisp"
+          - lisp: sbcl-bin
+            impl-type-output: "SBCL"
+    env:
+      LISP: ${{ matrix.lisp }}
+    name: install-custom [lisp=${{ matrix.lisp }}]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          # The repo already contains the qlot and qlot.lock files, and since
+          # we don't want those to interfere with the current test run, we
+          # clone the repository somewhere else (i.e. something different from
+          # the default './')
+          path: setup-lisp/
+      - uses: ./setup-lisp/
+        with:
+          roswell-version: ${{ needs.ci-config.outputs.roswell-version }}
+          asdf-version: ${{ needs.ci-config.outputs.asdf-version }}
+          qlot-version: ${{ needs.ci-config.outputs.qlot-version }}
+      - run: ros run --eval '(format t "~a~%" (lisp-implementation-type))' | grep '${{ matrix.impl-type-output }}'
+        shell: lispsh {0}
+
+  qlot-exec-ros-install:
+    needs: ci-config
+    if: needs.ci-config.outputs.enabled == 'yes'
     strategy:
       fail-fast: false # Let the workflow continue as much as possible
       matrix:
@@ -31,7 +103,7 @@ jobs:
         shell: lispsh {0}
     env:
       LISP: ${{ matrix.lisp }}
-    name: test with ${{ matrix.lisp }} on ${{ matrix.os }}
+    name: qlot-exec-ros-install [lisp=${{ matrix.lisp }},os=${{ matrix.os }}]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
@@ -41,18 +113,9 @@ jobs:
           # clone the repository somewhere else (i.e. something different from
           # the default './')
           path: setup-lisp/
-      - name: Call setup-lisp with default arguments
-        if: github.event_name != 'schedule'
-        uses: ./setup-lisp/
-      - name: Call setup-lisp and install latest
-        if: github.event_name == 'schedule'
-        uses: ./setup-lisp/
+      - uses: ./setup-lisp/
         with:
-          roswell-version: latest
-          # XXX remove this override (i.e. put "latest" back in) after the
-          # following roswell issue has been solved:
-          # https://github.com/roswell/roswell/issues/497
-          asdf-version: 3.3.5.3
-          qlot-version: latest
-      - run: ros config
+          roswell-version: ${{ needs.ci-config.outputs.roswell-version }}
+          asdf-version: ${{ needs.ci-config.outputs.asdf-version }}
+          qlot-version: ${{ needs.ci-config.outputs.qlot-version }}
       - run: qlot exec ros install 40ants/gh-pages
